@@ -1,9 +1,8 @@
 (function () {
-  const { parseDeck, diffDecks, cardKey, totalCards } = window.Deck;
+  const { parseDeck, diffDecks, totalCards } = window.Deck;
 
   const SCRYFALL = 'https://api.scryfall.com';
-  const BATCH_SIZE = 75; // max identifiers per /cards/collection request
-  const REQUEST_DELAY_MS = 100; // Scryfall asks for 50-100ms between requests
+  const REQUEST_INTERVAL_MS = 100; // Scryfall asks for 50-100ms between requests
 
   const els = {
     deckA: document.getElementById('deck-a'),
@@ -16,70 +15,66 @@
     results: document.getElementById('results'),
   };
 
-  // cardKey -> { name, price (number | null), url } ; persists across runs
+  // cardKey -> { name, price (number | null), url, notFound? } ; persists across runs
   const priceCache = new Map();
 
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-  const toNumber = (v) => (v == null ? null : Number(v));
-
-  function cacheCard(card) {
-    const p = card.prices || {};
-    const entry = {
-      name: card.name,
-      price: toNumber(p.usd),
-      foilPrice: toNumber(p.usd_foil ?? p.usd_etched), // last resort for foil-only cards
-      url: card.scryfall_uri,
-    };
-    priceCache.set(cardKey(card.name), entry);
-    return entry;
+  // Spaces request starts REQUEST_INTERVAL_MS apart while letting them overlap.
+  let nextSlot = 0;
+  async function throttledFetch(url) {
+    const now = Date.now();
+    const slot = Math.max(now, nextSlot);
+    nextSlot = slot + REQUEST_INTERVAL_MS;
+    await sleep(slot - now);
+    return fetch(url);
   }
 
-  async function fetchCheapestPrinting(key) {
-    const params = new URLSearchParams({
-      q: `!"${key}" usd>0`, unique: 'prints', order: 'usd', dir: 'asc',
-    });
-    const res = await fetch(`${SCRYFALL}/cards/search?${params}`);
-    if (!res.ok) return;
-    const { data } = await res.json();
-    if (data && data.length) cacheCard(data[0]);
+  // All printings of a card, cheapest first. Returns [] if nothing matches.
+  async function searchPrintings(query) {
+    const params = new URLSearchParams({ q: query, unique: 'prints', order: 'usd', dir: 'asc' });
+    const res = await throttledFetch(`${SCRYFALL}/cards/search?${params}`);
+    if (res.status === 404) return [];
+    if (!res.ok) throw new Error(`Scryfall returned ${res.status}`);
+    return (await res.json()).data || [];
+  }
+
+  async function fetchCheapestPrice(key) {
+    const exact = `!"${key.replace(/"/g, '')}"`;
+    const nonFoil = await searchPrintings(`${exact} usd>0`);
+    if (nonFoil.length) {
+      const card = nonFoil[0];
+      return { name: card.name, price: Number(card.prices.usd), url: card.scryfall_uri };
+    }
+
+    // No non-foil price (foil-only cards) or no such card at all.
+    const prints = await searchPrintings(exact);
+    if (!prints.length) return { name: null, price: null, url: null, notFound: true };
+    let best = null;
+    for (const card of prints) {
+      for (const v of [card.prices.usd_foil, card.prices.usd_etched]) {
+        if (v != null && (!best || Number(v) < best.price)) {
+          best = { name: card.name, price: Number(v), url: card.scryfall_uri };
+        }
+      }
+    }
+    return best || { name: prints[0].name, price: null, url: prints[0].scryfall_uri };
   }
 
   async function loadPrices(keys, onProgress) {
     const missing = [...new Set(keys)].filter((k) => !priceCache.has(k));
-    let first = true;
-    const wait = async () => { if (!first) await sleep(REQUEST_DELAY_MS); first = false; };
-
-    for (let i = 0; i < missing.length; i += BATCH_SIZE) {
-      const batch = missing.slice(i, i + BATCH_SIZE);
-      onProgress(`Fetching prices… (${Math.min(i + BATCH_SIZE, missing.length)}/${missing.length})`);
-      await wait();
-      const res = await fetch(`${SCRYFALL}/cards/collection`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ identifiers: batch.map((name) => ({ name })) }),
-      });
-      if (!res.ok) throw new Error(`Scryfall returned ${res.status}`);
-      const { data } = await res.json();
-      for (const card of data) cacheCard(card);
-      // Requested names that Scryfall couldn't find: remember so we don't refetch.
-      for (const key of batch) {
-        if (!priceCache.has(key)) priceCache.set(key, { name: null, price: null, url: null, notFound: true });
+    let done = 0;
+    let failed = 0;
+    onProgress(`Fetching prices… (0/${missing.length})`);
+    await Promise.all(missing.map(async (key) => {
+      try {
+        priceCache.set(key, await fetchCheapestPrice(key));
+      } catch {
+        failed++; // left uncached so the next run retries it
       }
-    }
-
-    // The default printing sometimes has no USD price (promos, new sets); fall back to the cheapest printing.
-    const unpriced = missing.filter((k) => {
-      const e = priceCache.get(k);
-      return e && !e.notFound && e.price == null;
-    });
-    for (const key of unpriced) {
-      onProgress(`Looking up cheapest printings… (${key})`);
-      await wait();
-      await fetchCheapestPrinting(key);
-      const entry = priceCache.get(key);
-      if (entry.price == null) entry.price = entry.foilPrice;
-    }
+      onProgress(`Fetching prices… (${++done}/${missing.length})`);
+    }));
+    if (failed) throw new Error(`${failed} card${failed > 1 ? 's' : ''} failed to load`);
   }
 
   // ---------- rendering ----------

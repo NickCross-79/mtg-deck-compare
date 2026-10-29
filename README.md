@@ -34,7 +34,7 @@ Section headers, comments (`//`), set codes, collector numbers, foil markers and
 
 ## Prices
 
-Prices come from Scryfall's default printing of each card. When that printing has no USD price (e.g. some promos), the cheapest non-foil printing is used instead, then the foil price as a last resort.
+Each card is priced at its cheapest printing on Scryfall: the cheapest non-foil USD price, or the cheapest foil/etched price for cards that only exist in foil.
 
 ## Tests
 
