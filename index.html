@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MTG Deck Compare</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header>
+    <h1>MTG Deck Compare</h1>
+    <p class="subtitle">Paste two deck lists to see how they differ, or what it takes to upgrade one into the other.</p>
+  </header>
+
+  <main>
+    <section class="inputs">
+      <label class="deck-input">
+        <span class="deck-label">Deck 1 <small>(your current deck)</small></span>
+        <textarea id="deck-a" spellcheck="false" placeholder="1 Sol Ring&#10;1 Arcane Signet&#10;10 Island&#10;..."></textarea>
+        <span class="count" id="count-a">0 cards</span>
+      </label>
+      <label class="deck-input">
+        <span class="deck-label">Deck 2 <small>(the deck to compare / upgrade to)</small></span>
+        <textarea id="deck-b" spellcheck="false" placeholder="1 Sol Ring&#10;1 Mana Crypt&#10;9 Island&#10;..."></textarea>
+        <span class="count" id="count-b">0 cards</span>
+      </label>
+    </section>
+
+    <div class="actions">
+      <button id="compare-btn" type="button">Compare</button>
+      <button id="upgrade-btn" type="button" class="primary">Upgrade</button>
+    </div>
+
+    <p id="status" class="status" role="status" aria-live="polite"></p>
+    <section id="results" class="results"></section>
+  </main>
+
+  <footer>
+    Prices in USD from <a href="https://scryfall.com" target="_blank" rel="noopener">Scryfall</a>
+    (cheapest non-foil printing when the default printing has no price).
+  </footer>
+
+  <script src="deck.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
