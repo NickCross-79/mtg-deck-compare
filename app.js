@@ -1,80 +1,102 @@
 (function () {
-  const { parseDeck, diffDecks, totalCards } = window.Deck;
+  const { parseDeck, diffDecks, cardKey, totalCards } = window.Deck;
 
   const SCRYFALL = 'https://api.scryfall.com';
-  const REQUEST_INTERVAL_MS = 100; // Scryfall asks for 50-100ms between requests
+  // Scryfall limits /cards/search to about 2 requests per second; going faster gets requests rejected.
+  const REQUEST_INTERVAL_MS = 500;
+  const NAMES_PER_QUERY = 20; // keeps the search URL a reasonable length
+  const MAX_ATTEMPTS = 4;
 
   const els = {
     deckA: document.getElementById('deck-a'),
     deckB: document.getElementById('deck-b'),
     countA: document.getElementById('count-a'),
     countB: document.getElementById('count-b'),
-    compareBtn: document.getElementById('compare-btn'),
     upgradeBtn: document.getElementById('upgrade-btn'),
     status: document.getElementById('status'),
     results: document.getElementById('results'),
   };
 
-  // cardKey -> { name, price (number | null), url, notFound? } ; persists across runs
+  // cardKey -> { name, price (number | null), url, image, imageLarge, notFound? } ; persists across runs
   const priceCache = new Map();
 
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-  // Spaces request starts REQUEST_INTERVAL_MS apart while letting them overlap.
+  // Spaces request starts REQUEST_INTERVAL_MS apart, retrying with backoff when Scryfall
+  // rejects one (a rate-limited response has no CORS headers, so it surfaces as a network error).
   let nextSlot = 0;
-  async function throttledFetch(url) {
-    const now = Date.now();
-    const slot = Math.max(now, nextSlot);
-    nextSlot = slot + REQUEST_INTERVAL_MS;
-    await sleep(slot - now);
-    return fetch(url);
-  }
-
-  // All printings of a card, cheapest first. Returns [] if nothing matches.
-  async function searchPrintings(query) {
-    const params = new URLSearchParams({ q: query, unique: 'prints', order: 'usd', dir: 'asc' });
-    const res = await throttledFetch(`${SCRYFALL}/cards/search?${params}`);
-    if (res.status === 404) return [];
-    if (!res.ok) throw new Error(`Scryfall returned ${res.status}`);
-    return (await res.json()).data || [];
-  }
-
-  async function fetchCheapestPrice(key) {
-    const exact = `!"${key.replace(/"/g, '')}"`;
-    const nonFoil = await searchPrintings(`${exact} usd>0`);
-    if (nonFoil.length) {
-      const card = nonFoil[0];
-      return { name: card.name, price: Number(card.prices.usd), url: card.scryfall_uri };
+  async function scryfallGet(url) {
+    for (let attempt = 1; ; attempt++) {
+      const now = Date.now();
+      const slot = Math.max(now, nextSlot);
+      nextSlot = slot + REQUEST_INTERVAL_MS;
+      await sleep(slot - now);
+      try {
+        const res = await fetch(url);
+        if (res.status === 404) return { data: [] }; // query matched nothing
+        if (res.ok) return await res.json();
+        if (res.status !== 429 && res.status < 500) throw new Error(`Scryfall returned ${res.status}`);
+      } catch (err) {
+        if (attempt >= MAX_ATTEMPTS || err.message.startsWith('Scryfall returned')) throw err;
+      }
+      if (attempt >= MAX_ATTEMPTS) throw new Error('Scryfall is rate limiting requests, try again shortly');
+      await sleep(1000 * 2 ** (attempt - 1));
     }
+  }
 
-    // No non-foil price (foil-only cards) or no such card at all.
-    const prints = await searchPrintings(exact);
-    if (!prints.length) return { name: null, price: null, url: null, notFound: true };
+  function imagesOf(card) {
+    const uris = card.image_uris || card.card_faces?.[0]?.image_uris || {};
+    return { image: uris.small || null, imageLarge: uris.normal || uris.large || null };
+  }
+
+  // Every paper printing of the given cards, in one paged search per batch of names.
+  async function fetchPrintings(keys) {
+    const query = `game:paper (${keys.map((k) => `!"${k.replace(/"/g, '')}"`).join(' or ')})`;
+    const params = new URLSearchParams({ q: query, unique: 'prints', order: 'name' });
+    let url = `${SCRYFALL}/cards/search?${params}`;
+    const prints = [];
+    while (url) {
+      const page = await scryfallGet(url);
+      prints.push(...(page.data || []));
+      url = page.has_more ? page.next_page : null;
+    }
+    return prints;
+  }
+
+  // Picks the cheapest printing: the lowest non-foil price, or the lowest foil/etched
+  // price for cards that only exist in foil.
+  function cheapest(prints) {
     let best = null;
+    let bestFoil = null;
     for (const card of prints) {
-      for (const v of [card.prices.usd_foil, card.prices.usd_etched]) {
-        if (v != null && (!best || Number(v) < best.price)) {
-          best = { name: card.name, price: Number(v), url: card.scryfall_uri };
-        }
+      const p = card.prices || {};
+      if (p.usd != null && (!best || Number(p.usd) < best.price)) best = { card, price: Number(p.usd) };
+      for (const v of [p.usd_foil, p.usd_etched]) {
+        if (v != null && (!bestFoil || Number(v) < bestFoil.price)) bestFoil = { card, price: Number(v) };
       }
     }
-    return best || { name: prints[0].name, price: null, url: prints[0].scryfall_uri };
+    const pick = best || bestFoil || { card: prints[0], price: null };
+    return { name: pick.card.name, price: pick.price, url: pick.card.scryfall_uri, ...imagesOf(pick.card) };
   }
 
   async function loadPrices(keys, onProgress) {
     const missing = [...new Set(keys)].filter((k) => !priceCache.has(k));
     let done = 0;
-    let failed = 0;
-    onProgress(`Fetching prices… (0/${missing.length})`);
-    await Promise.all(missing.map(async (key) => {
-      try {
-        priceCache.set(key, await fetchCheapestPrice(key));
-      } catch {
-        failed++; // left uncached so the next run retries it
+    for (let i = 0; i < missing.length; i += NAMES_PER_QUERY) {
+      onProgress(`Fetching prices… (${done}/${missing.length})`);
+      const batch = missing.slice(i, i + NAMES_PER_QUERY);
+      const byKey = new Map();
+      for (const card of await fetchPrintings(batch)) {
+        const key = cardKey(card.name);
+        if (!byKey.has(key)) byKey.set(key, []);
+        byKey.get(key).push(card);
       }
-      onProgress(`Fetching prices… (${++done}/${missing.length})`);
-    }));
-    if (failed) throw new Error(`${failed} card${failed > 1 ? 's' : ''} failed to load`);
+      for (const key of batch) {
+        const prints = byKey.get(key);
+        priceCache.set(key, prints ? cheapest(prints) : { name: null, price: null, url: null, notFound: true });
+      }
+      done += batch.length;
+    }
   }
 
   // ---------- rendering ----------
@@ -93,6 +115,8 @@
         ...c,
         name: info.name || c.name,
         url: info.url,
+        image: info.image,
+        imageLarge: info.imageLarge,
         notFound: !!info.notFound,
         unit,
         total: unit == null ? null : unit * c.qty,
@@ -133,7 +157,10 @@
             : escapeHtml(c.name);
           const each = c.qty > 1 && c.unit != null ? `<span class="each">${money(c.unit)} ea</span>` : '';
           const flag = c.notFound ? '<span class="flag" title="Card not found on Scryfall">not found</span>' : '';
-          return `<li><span class="qty">${c.qty}</span><span class="name">${name}${flag}</span>` +
+          const thumb = c.image
+            ? `<img class="thumb" src="${escapeHtml(c.image)}" data-large="${escapeHtml(c.imageLarge || c.image)}" alt="" loading="lazy">`
+            : '<span class="thumb"></span>';
+          return `<li><span class="qty">${c.qty}</span>${thumb}<span class="name">${name}${flag}</span>` +
                  `<span class="price">${each}${money(c.total)}</span></li>`;
         }).join('')
       : '<li class="empty">No cards</li>';
@@ -160,13 +187,13 @@
     return div;
   }
 
-  function render(mode, a, b, diff) {
+  function render(diff) {
     const onlyA = withPrices(diff.onlyA);
     const onlyB = withPrices(diff.onlyB);
     els.results.innerHTML = '';
 
     const heading = document.createElement('h2');
-    heading.textContent = mode === 'compare' ? 'Differences' : 'Upgrade plan';
+    heading.textContent = 'Upgrade plan';
     els.results.appendChild(heading);
 
     if (!onlyA.length && !onlyB.length) {
@@ -180,27 +207,17 @@
     const lists = document.createElement('div');
     lists.className = 'lists';
 
-    if (mode === 'compare') {
-      els.results.appendChild(renderSummary([
-        ['Deck 1 cards', totalCards(a)],
-        ['Deck 2 cards', totalCards(b)],
-        ['Only in Deck 1', onlyA.reduce((s, c) => s + c.qty, 0)],
-        ['Only in Deck 2', onlyB.reduce((s, c) => s + c.qty, 0)],
-      ]));
-      lists.append(renderList('Only in Deck 1', onlyA, 'side-a'), renderList('Only in Deck 2', onlyB, 'side-b'));
-    } else {
-      const addCost = sumTotal(onlyB);
-      const removeValue = sumTotal(onlyA);
-      const net = addCost - removeValue;
-      els.results.appendChild(renderSummary([
-        ['Cards to add', onlyB.reduce((s, c) => s + c.qty, 0)],
-        ['Cards to remove', onlyA.reduce((s, c) => s + c.qty, 0)],
-        ['Cost of additions', money(addCost), 'cost'],
-        ['Value of removals', money(removeValue)],
-        ['Net cost', (net < 0 ? '−' : '') + money(Math.abs(net))],
-      ]));
-      lists.append(renderList('Remove', onlyA, 'remove'), renderList('Add', onlyB, 'add'));
-    }
+    const addCost = sumTotal(onlyB);
+    const removeValue = sumTotal(onlyA);
+    const net = addCost - removeValue;
+    els.results.appendChild(renderSummary([
+      ['Cards to add', onlyB.reduce((s, c) => s + c.qty, 0)],
+      ['Cards to remove', onlyA.reduce((s, c) => s + c.qty, 0)],
+      ['Cost of additions', money(addCost), 'cost'],
+      ['Value of removals', money(removeValue)],
+      ['Net cost', (net < 0 ? '−' : '') + money(Math.abs(net))],
+    ]));
+    lists.append(renderList('Remove', onlyA, 'remove'), renderList('Add', onlyB, 'add'));
     els.results.appendChild(lists);
 
     const missing = [...onlyA, ...onlyB].filter((c) => c.notFound).map((c) => c.name);
@@ -219,7 +236,7 @@
     els.countB.textContent = `${totalCards(parseDeck(els.deckB.value))} cards`;
   }
 
-  async function run(mode) {
+  async function run() {
     const a = parseDeck(els.deckA.value);
     const b = parseDeck(els.deckB.value);
     if (!a.size || !b.size) {
@@ -229,7 +246,7 @@
     }
 
     const diff = diffDecks(a, b);
-    els.compareBtn.disabled = els.upgradeBtn.disabled = true;
+    els.upgradeBtn.disabled = true;
     els.status.className = 'status';
     try {
       await loadPrices([...diff.onlyA, ...diff.onlyB].map((c) => c.key), (msg) => { els.status.textContent = msg; });
@@ -238,14 +255,43 @@
       els.status.textContent = `Couldn't load prices: ${err.message}. Showing cards without prices.`;
       els.status.className = 'status error';
     } finally {
-      els.compareBtn.disabled = els.upgradeBtn.disabled = false;
+      els.upgradeBtn.disabled = false;
     }
-    render(mode, a, b, diff);
+    render(diff);
   }
+
+  // Enlarged card image that follows the cursor while hovering a thumbnail.
+  const preview = document.createElement('img');
+  preview.className = 'card-preview';
+  preview.alt = '';
+  document.body.appendChild(preview);
+
+  function placePreview(e) {
+    const gap = 16;
+    const w = preview.offsetWidth;
+    const h = preview.offsetHeight;
+    let x = e.clientX + gap;
+    if (x + w > window.innerWidth - gap) x = e.clientX - w - gap;
+    const y = Math.min(Math.max(gap, e.clientY - h / 2), window.innerHeight - h - gap);
+    preview.style.transform = `translate(${Math.max(gap, x)}px, ${y}px)`;
+  }
+
+  els.results.addEventListener('mouseover', (e) => {
+    const thumb = e.target.closest('img.thumb');
+    if (!thumb) return;
+    preview.src = thumb.dataset.large;
+    preview.classList.add('visible');
+    placePreview(e);
+  });
+  els.results.addEventListener('mousemove', (e) => {
+    if (preview.classList.contains('visible')) placePreview(e);
+  });
+  els.results.addEventListener('mouseout', (e) => {
+    if (e.target.closest('img.thumb')) preview.classList.remove('visible');
+  });
 
   els.deckA.addEventListener('input', updateCounts);
   els.deckB.addEventListener('input', updateCounts);
-  els.compareBtn.addEventListener('click', () => run('compare'));
-  els.upgradeBtn.addEventListener('click', () => run('upgrade'));
+  els.upgradeBtn.addEventListener('click', run);
   updateCounts();
 })();

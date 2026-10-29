@@ -9,7 +9,7 @@
 <body>
   <header>
     <h1>MTG Deck Compare</h1>
-    <p class="subtitle">Paste two deck lists to see how they differ, or what it takes to upgrade one into the other.</p>
+    <p class="subtitle">Paste your deck and a target deck to see which cards to cut and which to add.</p>
   </header>
 
   <main>
@@ -20,14 +20,13 @@
         <span class="count" id="count-a">0 cards</span>
       </label>
       <label class="deck-input">
-        <span class="deck-label">Deck 2 <small>(the deck to compare / upgrade to)</small></span>
+        <span class="deck-label">Deck 2 <small>(the deck to upgrade to)</small></span>
         <textarea id="deck-b" spellcheck="false" placeholder="1 Sol Ring&#10;1 Mana Crypt&#10;9 Island&#10;..."></textarea>
         <span class="count" id="count-b">0 cards</span>
       </label>
     </section>
 
     <div class="actions">
-      <button id="compare-btn" type="button">Compare</button>
       <button id="upgrade-btn" type="button" class="primary">Upgrade</button>
     </div>
 
@@ -37,7 +36,7 @@
 
   <footer>
     Prices in USD from <a href="https://scryfall.com" target="_blank" rel="noopener">Scryfall</a>
-    (cheapest printing of each card).
+    (cheapest printing of each card). Hover a card image to enlarge it.
   </footer>
 
   <script src="deck.js"></script>
