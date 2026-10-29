@@ -3,40 +3,55 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>MTG Deck Compare</title>
+  <title>Deck Upgrade</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=Vollkorn:ital,wght@0,500;0,700;1,500&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-  <header>
-    <h1>MTG Deck Compare</h1>
-    <p class="subtitle">Paste your deck and a target deck to see which cards to cut and which to add.</p>
+  <header class="masthead">
+    <h1>Deck Upgrade</h1>
+    <p class="lede">Paste the deck you play and the deck you want. You'll get what to cut, what to add, and what it costs.</p>
   </header>
 
   <main>
     <section class="inputs">
-      <label class="deck-input">
-        <span class="deck-label">Deck 1 <small>(your current deck)</small></span>
-        <textarea id="deck-a" spellcheck="false" placeholder="1 Sol Ring&#10;1 Arcane Signet&#10;10 Island&#10;..."></textarea>
-        <span class="count" id="count-a">0 cards</span>
-      </label>
-      <label class="deck-input">
-        <span class="deck-label">Deck 2 <small>(the deck to upgrade to)</small></span>
-        <textarea id="deck-b" spellcheck="false" placeholder="1 Sol Ring&#10;1 Mana Crypt&#10;9 Island&#10;..."></textarea>
-        <span class="count" id="count-b">0 cards</span>
-      </label>
+      <div class="deck-input">
+        <div class="deck-head">
+          <label for="deck-a">Your deck</label>
+          <span class="count" id="count-a">0 cards</span>
+        </div>
+        <textarea id="deck-a" spellcheck="false" placeholder="1 Sol Ring&#10;1 Arcane Signet&#10;1 Cultivate&#10;10 Island"></textarea>
+      </div>
+      <div class="deck-input">
+        <div class="deck-head">
+          <label for="deck-b">Target deck</label>
+          <span class="count" id="count-b">0 cards</span>
+        </div>
+        <textarea id="deck-b" spellcheck="false" placeholder="1 Sol Ring&#10;1 Mana Crypt&#10;1 Rhystic Study&#10;9 Island"></textarea>
+      </div>
     </section>
 
     <div class="actions">
       <button id="upgrade-btn" type="button" class="primary">Upgrade</button>
+      <p id="status" class="status" role="status" aria-live="polite"></p>
     </div>
 
-    <p id="status" class="status" role="status" aria-live="polite"></p>
-    <section id="results" class="results"></section>
+    <section id="results" class="results" aria-live="polite"></section>
   </main>
 
-  <footer>
-    Prices in USD from <a href="https://scryfall.com" target="_blank" rel="noopener">Scryfall</a>
-    (cheapest printing of each card). Hover a card image to enlarge it.
+  <footer class="colophon">
+    <p>
+      Prices are the cheapest printing on <a href="https://scryfall.com" target="_blank" rel="noopener">Scryfall</a>, in US dollars.
+      Hover a card to see it full size.
+    </p>
+    <ul class="legend" aria-label="Price colors">
+      <li class="tier-common">Under $1</li>
+      <li class="tier-uncommon">$1 to $10</li>
+      <li class="tier-rare">$10 to $50</li>
+      <li class="tier-mythic">$50 and up</li>
+    </ul>
   </footer>
 
   <script src="deck.js"></script>
