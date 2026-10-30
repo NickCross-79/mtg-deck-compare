@@ -158,12 +158,16 @@
   const countOf = (cards) => cards.reduce((s, c) => s + c.qty, 0);
   const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
 
-  function renderList(title, cards, variant) {
+  const included = (cards) => cards.filter((c) => !c.excluded);
+
+  // A priced card list. Each card has a checkbox; unticked cards stay visible but are
+  // left out of the list's total, the summary and the copied text. onChange runs after a toggle.
+  function renderList(title, cards, variant, onChange) {
     const panel = document.createElement('section');
     panel.className = `list-panel ${variant}`;
 
     const rows = cards.length
-      ? cards.map((c) => {
+      ? cards.map((c, i) => {
           const name = c.url
             ? `<a href="${escapeHtml(c.url)}" target="_blank" rel="noopener">${escapeHtml(c.name)}</a>`
             : escapeHtml(c.name);
@@ -172,7 +176,9 @@
           const thumb = c.image
             ? `<img class="thumb" src="${escapeHtml(c.image)}" data-large="${escapeHtml(c.imageLarge || c.image)}" alt="" loading="lazy">`
             : '<span class="thumb"></span>';
-          return `<li>${thumb}<span class="qty">${c.qty}</span><span class="name">${name}${flag}</span>` +
+          return `<li data-index="${i}">` +
+                 `<input type="checkbox" class="toggle" checked aria-label="Include ${escapeHtml(c.name)}">` +
+                 `${thumb}<span class="qty">${c.qty}</span><span class="name">${name}${flag}</span>` +
                  `<span class="price tier-${tierOf(c.unit)}">${each}<span class="amount">${money(c.total)}</span></span></li>`;
         }).join('')
       : '<li class="empty">Nothing here</li>';
@@ -181,20 +187,46 @@
       <header class="list-header">
         <div>
           <h3>${escapeHtml(title)}</h3>
-          <p class="list-meta">${plural(countOf(cards), 'card')}, ${money(sumTotal(cards))}</p>
+          <p class="list-meta"></p>
         </div>
-        <button type="button" class="copy-btn"${cards.length ? '' : ' disabled'}>Copy list</button>
+        <button type="button" class="copy-btn">Copy list</button>
       </header>
       <ul class="card-list">${rows}</ul>`;
 
-    const text = cards.map((c) => `${c.qty} ${c.name}`).join('\n');
-    panel.querySelector('.copy-btn').addEventListener('click', (e) => copyText(text, e.currentTarget));
+    const meta = panel.querySelector('.list-meta');
+    const copyBtn = panel.querySelector('.copy-btn');
+
+    function updateMeta() {
+      const kept = included(cards);
+      const skipped = cards.length - kept.length;
+      meta.textContent = `${plural(countOf(kept), 'card')}, ${money(sumTotal(kept))}` +
+        (skipped ? ` (${skipped} unticked)` : '');
+      copyBtn.disabled = !kept.length;
+    }
+
+    panel.querySelector('.card-list').addEventListener('change', (e) => {
+      if (!e.target.matches('input.toggle')) return;
+      const row = e.target.closest('li');
+      const card = cards[row.dataset.index];
+      card.excluded = !e.target.checked;
+      row.classList.toggle('excluded', card.excluded);
+            updateMeta();
+      onChange();
+    });
+
+    copyBtn.addEventListener('click', (e) => {
+      const text = included(cards).map((c) => `${c.qty} ${c.name}`).join('\n');
+      copyText(text, e.currentTarget);
+    });
+
+    updateMeta();
     return panel;
   }
 
   function render(diff) {
     const cuts = withPrices(diff.onlyA);
     const adds = withPrices(diff.onlyB);
+    const shared = withPrices(diff.shared);
     els.results.innerHTML = '';
 
     const heading = document.createElement('h2');
@@ -205,27 +237,39 @@
     summary.className = 'summary';
     els.results.appendChild(summary);
 
-    if (!cuts.length && !adds.length) {
-      summary.textContent = 'These decks have exactly the same cards. Nothing to cut or add.';
-      return;
+    function updateSummary() {
+      const keptShared = included(shared);
+      const sharedText = keptShared.length
+        ? ` The ${plural(countOf(keptShared), 'card')} in both decks ${countOf(keptShared) === 1 ? 'is' : 'are'} worth <strong>${money(sumTotal(keptShared))}</strong>.`
+        : '';
+      if (!cuts.length && !adds.length) {
+        summary.innerHTML = `These decks have exactly the same cards. Nothing to cut or add.${sharedText}`;
+        return;
+      }
+      const keptAdds = included(adds);
+      const keptCuts = included(cuts);
+      const addCost = sumTotal(keptAdds);
+      const cutValue = sumTotal(keptCuts);
+      const net = addCost - cutValue;
+      summary.innerHTML =
+        `Add ${plural(countOf(keptAdds), 'card')} for <strong>${money(addCost)}</strong> ` +
+        `and cut ${plural(countOf(keptCuts), 'card')} worth <strong>${money(cutValue)}</strong>. ` +
+        (net >= 0
+          ? `Net cost of the upgrade: <strong class="net">${money(net)}</strong>.`
+          : `The cuts are worth <strong class="net">${money(-net)}</strong> more than the additions.`) +
+        sharedText;
     }
 
-    const addCost = sumTotal(adds);
-    const cutValue = sumTotal(cuts);
-    const net = addCost - cutValue;
-    summary.innerHTML =
-      `Add ${plural(countOf(adds), 'card')} for <strong>${money(addCost)}</strong> ` +
-      `and cut ${plural(countOf(cuts), 'card')} worth <strong>${money(cutValue)}</strong>. ` +
-      (net >= 0
-        ? `Net cost of the upgrade: <strong class="net">${money(net)}</strong>.`
-        : `The cuts are worth <strong class="net">${money(-net)}</strong> more than the additions.`);
+    if (cuts.length || adds.length) {
+      const lists = document.createElement('div');
+      lists.className = 'lists';
+      lists.append(renderList('Cut', cuts, 'cut', updateSummary), renderList('Add', adds, 'add', updateSummary));
+      els.results.appendChild(lists);
+    }
+    if (shared.length) els.results.appendChild(renderList('In both decks', shared, 'shared', updateSummary));
+    updateSummary();
 
-    const lists = document.createElement('div');
-    lists.className = 'lists';
-    lists.append(renderList('Cut', cuts, 'cut'), renderList('Add', adds, 'add'));
-    els.results.appendChild(lists);
-
-    const missing = [...cuts, ...adds].filter((c) => c.notFound).map((c) => c.name);
+    const missing = [...cuts, ...adds, ...shared].filter((c) => c.notFound).map((c) => c.name);
     if (missing.length) {
       const p = document.createElement('p');
       p.className = 'warning';
@@ -254,7 +298,7 @@
     els.upgradeBtn.disabled = true;
     els.status.className = 'status';
     try {
-      await loadPrices([...diff.onlyA, ...diff.onlyB].map((c) => c.key), (msg) => { els.status.textContent = msg; });
+      await loadPrices([...diff.onlyA, ...diff.onlyB, ...diff.shared].map((c) => c.key), (msg) => { els.status.textContent = msg; });
       els.status.textContent = '';
     } catch (err) {
       els.status.textContent = `Prices didn't load (${err.message}). Press Upgrade again to retry.`;

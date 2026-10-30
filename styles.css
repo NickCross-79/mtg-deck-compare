@@ -176,6 +176,7 @@ h2 { margin: 0; font: 700 2rem/1.1 var(--serif); letter-spacing: -0.01em; }
 }
 .list-panel.cut { --side: var(--cut); }
 .list-panel.add { --side: var(--add); }
+.list-panel.shared { --side: var(--ink-soft); margin-top: 24px; }
 
 .list-header {
   display: flex;
@@ -192,13 +193,35 @@ h2 { margin: 0; font: 700 2rem/1.1 var(--serif); letter-spacing: -0.01em; }
 
 .card-list li {
   display: grid;
-  grid-template-columns: 40px 1.6em 1fr auto;
+  grid-template-columns: 18px 40px 1.6em 1fr auto;
   gap: 12px;
   align-items: center;
   padding: 6px 20px;
 }
 .card-list li:nth-child(even) { background: var(--stripe); }
 .card-list li.empty { display: block; padding: 20px; color: var(--ink-soft); }
+
+/* two columns for the (usually long) list of cards in both decks */
+@media (min-width: 761px) {
+  .list-panel.shared .card-list { column-count: 2; column-gap: 0; }
+  .list-panel.shared .card-list li { break-inside: avoid; }
+}
+
+.toggle {
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  accent-color: var(--side);
+  cursor: pointer;
+}
+
+/* unticked cards: kept in place but visibly left out of totals */
+.card-list li.excluded .thumb { opacity: 0.35; filter: grayscale(1); }
+.card-list li.excluded .qty,
+.card-list li.excluded .name,
+.card-list li.excluded .price { opacity: 0.45; }
+.card-list li.excluded .name,
+.card-list li.excluded .amount { text-decoration: line-through; text-decoration-thickness: 1.5px; }
 
 .thumb {
   display: block;

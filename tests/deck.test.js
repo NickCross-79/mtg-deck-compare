@@ -36,5 +36,10 @@ test('diff accounts for quantity differences', () => {
       { key: 'counterspell', name: 'Counterspell', qty: 1 },
       { key: 'island', name: 'Island', qty: 2 },
     ],
+    shared: [
+      { key: 'island', name: 'Island', qty: 10 },
+      { key: 'lightning bolt', name: 'Lightning Bolt', qty: 2 },
+      { key: 'sol ring', name: 'Sol Ring', qty: 1 },
+    ],
   });
 });

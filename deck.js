@@ -65,8 +65,18 @@
     return out.sort((x, y) => x.name.localeCompare(y.name));
   }
 
+  // Cards in both decks, at the quantity they have in common.
+  function intersect(a, b) {
+    const out = [];
+    for (const [key, card] of a) {
+      const qty = Math.min(card.qty, b.get(key)?.qty || 0);
+      if (qty > 0) out.push({ key, name: card.name, qty });
+    }
+    return out.sort((x, y) => x.name.localeCompare(y.name));
+  }
+
   function diffDecks(a, b) {
-    return { onlyA: subtract(a, b), onlyB: subtract(b, a) };
+    return { onlyA: subtract(a, b), onlyB: subtract(b, a), shared: intersect(a, b) };
   }
 
   function totalCards(deck) {
