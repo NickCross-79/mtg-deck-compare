@@ -15,6 +15,9 @@
     upgradeBtn: document.getElementById('upgrade-btn'),
     status: document.getElementById('status'),
     results: document.getElementById('results'),
+    currencyInputs: document.querySelectorAll('input[name="currency"]'),
+    currencyNote: document.getElementById('currency-note'),
+    legend: document.querySelectorAll('.legend li'),
   };
 
   // cardKey -> { name, price (number | null), url, image, imageLarge, notFound? } ; persists across runs
@@ -101,12 +104,19 @@
 
   // ---------- rendering ----------
 
-  const currency = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });
-  const money = (n) => (n == null ? '—' : currency.format(n));
+  // Prices are fetched in USD and converted for display when CAD is selected.
+  const formats = {
+    USD: new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }),
+    CAD: new Intl.NumberFormat('en-US', { style: 'currency', currency: 'CAD' }), // "CA$1.00"
+  };
+  const display = { code: 'USD', rate: 1 };
+  const money = (usd) => (usd == null ? '—' : formats[display.code].format(usd * display.rate));
 
   // Price tiers borrow the rarity-symbol colors: cheap cards read as commons, pricey ones as mythics.
-  function tierOf(price) {
-    if (price == null) return 'none';
+  // Thresholds apply to the displayed currency.
+  function tierOf(usd) {
+    if (usd == null) return 'none';
+    const price = usd * display.rate;
     if (price < 1) return 'common';
     if (price < 10) return 'uncommon';
     if (price < 50) return 'rare';
@@ -176,8 +186,8 @@
           const thumb = c.image
             ? `<img class="thumb" src="${escapeHtml(c.image)}" data-large="${escapeHtml(c.imageLarge || c.image)}" alt="" loading="lazy">`
             : '<span class="thumb"></span>';
-          return `<li data-index="${i}">` +
-                 `<input type="checkbox" class="toggle" checked aria-label="Include ${escapeHtml(c.name)}">` +
+          return `<li data-index="${i}"${c.excluded ? ' class="excluded"' : ''}>` +
+                 `<input type="checkbox" class="toggle"${c.excluded ? '' : ' checked'} aria-label="Include ${escapeHtml(c.name)}">` +
                  `${thumb}<span class="qty">${c.qty}</span><span class="name">${name}${flag}</span>` +
                  `<span class="price tier-${tierOf(c.unit)}">${each}<span class="amount">${money(c.total)}</span></span></li>`;
         }).join('')
@@ -210,7 +220,7 @@
       const card = cards[row.dataset.index];
       card.excluded = !e.target.checked;
       row.classList.toggle('excluded', card.excluded);
-            updateMeta();
+      updateMeta();
       onChange();
     });
 
@@ -223,10 +233,12 @@
     return panel;
   }
 
-  function render(diff) {
-    const cuts = withPrices(diff.onlyA);
-    const adds = withPrices(diff.onlyB);
-    const shared = withPrices(diff.shared);
+  // The latest upgrade plan, kept so a currency switch can redraw it without losing ticks.
+  let plan = null;
+
+  function render() {
+    if (!plan) return;
+    const { cuts, adds, shared } = plan;
     els.results.innerHTML = '';
 
     const heading = document.createElement('h2');
@@ -306,8 +318,62 @@
     } finally {
       els.upgradeBtn.disabled = false;
     }
-    render(diff);
+    plan = { cuts: withPrices(diff.onlyA), adds: withPrices(diff.onlyB), shared: withPrices(diff.shared) };
+    render();
   }
+
+  // ---------- currency ----------
+
+  const RATE_URL = 'https://api.frankfurter.dev/v1/latest?base=USD&symbols=CAD';
+  const CURRENCY_KEY = 'deck-upgrade:currency';
+  let cadRate = null; // { rate, date }
+
+  async function fetchCadRate() {
+    if (cadRate) return cadRate;
+    const res = await fetch(RATE_URL);
+    if (!res.ok) throw new Error(`exchange rate service returned ${res.status}`);
+    const data = await res.json();
+    cadRate = { rate: data.rates.CAD, date: data.date };
+    return cadRate;
+  }
+
+  function updateCurrencyNotes() {
+    const tiers = [[null, 1], [1, 10], [10, 50], [50, null]];
+    const whole = (n) => formats[display.code].format(n).replace(/\.00$/, '');
+    els.legend.forEach((li, i) => {
+      const [lo, hi] = tiers[i];
+      li.textContent = lo == null ? `Under ${whole(hi)}` : hi == null ? `${whole(lo)} and up` : `${whole(lo)} to ${whole(hi)}`;
+    });
+    if (display.code === 'CAD') {
+      const date = new Date(`${cadRate.date}T00:00:00`).toLocaleDateString('en-CA', { month: 'long', day: 'numeric', year: 'numeric' });
+      els.currencyNote.textContent = `converted to Canadian dollars at 1 USD = ${cadRate.rate.toFixed(4)} CAD (rate from ${date})`;
+    } else {
+      els.currencyNote.textContent = 'in US dollars';
+    }
+  }
+
+  async function setCurrency(code) {
+    if (code === 'CAD') {
+      try {
+        display.rate = (await fetchCadRate()).rate;
+      } catch (err) {
+        els.status.textContent = `Couldn't get the USD to CAD rate (${err.message}). Showing US dollars.`;
+        els.status.className = 'status error';
+        code = 'USD';
+      }
+    }
+    if (code === 'USD') display.rate = 1;
+    display.code = code;
+    els.currencyInputs.forEach((input) => { input.checked = input.value === code; });
+    try { localStorage.setItem(CURRENCY_KEY, code); } catch {}
+    updateCurrencyNotes();
+    render();
+  }
+
+  els.currencyInputs.forEach((input) => input.addEventListener('change', () => setCurrency(input.value)));
+  let savedCurrency = null;
+  try { savedCurrency = localStorage.getItem(CURRENCY_KEY); } catch {}
+  if (savedCurrency === 'CAD') setCurrency('CAD');
 
   // Enlarged card image that follows the cursor while hovering a thumbnail.
   const preview = document.createElement('img');

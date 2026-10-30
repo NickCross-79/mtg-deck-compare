@@ -145,6 +145,37 @@ button.primary {
 }
 
 .status { margin: 0; color: var(--ink-soft); }
+
+/* USD / CAD segmented switch */
+.currency {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  margin: 0 0 0 auto;
+  padding: 0;
+  border: 0;
+}
+.currency legend {
+  float: left;
+  margin-right: 10px;
+  padding: 0;
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+}
+.currency label { position: relative; cursor: pointer; }
+.currency input { position: absolute; opacity: 0; inset: 0; margin: 0; cursor: pointer; }
+.currency span {
+  display: block;
+  padding: 8px 14px;
+  font: 600 0.85rem/1 var(--sans);
+  border: 1px solid var(--rule);
+  background: var(--panel);
+  color: var(--ink-soft);
+}
+.currency label:first-of-type span { border-radius: 4px 0 0 4px; }
+.currency label:last-of-type span { border-radius: 0 4px 4px 0; margin-left: -1px; }
+.currency input:checked + span { background: var(--ink); border-color: var(--ink); color: var(--panel); }
+.currency input:focus-visible + span { outline: 2px solid var(--focus); outline-offset: 2px; }
 .status.error { color: var(--mythic); }
 
 /* ---------- results ---------- */

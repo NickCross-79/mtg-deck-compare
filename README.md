@@ -35,6 +35,8 @@ Section headers, comments (`//`), set codes, collector numbers, foil markers and
 
 Each card is priced at its cheapest printing on Scryfall: the cheapest non-foil USD price, or the cheapest foil/etched price for cards that only exist in foil.
 
+Prices are in US dollars by default. The USD / CAD switch converts them to Canadian dollars using the day's exchange rate from [Frankfurter](https://frankfurter.dev), and the page remembers your choice.
+
 ## Tests
 
 ```bash

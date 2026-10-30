@@ -36,6 +36,11 @@
     <div class="actions">
       <button id="upgrade-btn" type="button" class="primary">Upgrade</button>
       <p id="status" class="status" role="status" aria-live="polite"></p>
+      <fieldset class="currency">
+        <legend>Prices in</legend>
+        <label><input type="radio" name="currency" value="USD" checked><span>USD</span></label>
+        <label><input type="radio" name="currency" value="CAD"><span>CAD</span></label>
+      </fieldset>
     </div>
 
     <section id="results" class="results" aria-live="polite"></section>
@@ -43,7 +48,7 @@
 
   <footer class="colophon">
     <p>
-      Prices are the cheapest printing on <a href="https://scryfall.com" target="_blank" rel="noopener">Scryfall</a>, in US dollars.
+      Prices are the cheapest printing on <a href="https://scryfall.com" target="_blank" rel="noopener">Scryfall</a>, <span id="currency-note">in US dollars</span>.
       Hover a card to see it full size.
     </p>
     <ul class="legend" aria-label="Price colors">
